@@ -8,7 +8,7 @@ import requests
 import elasticsearch
 import json
 import logging
-from requests import ConnectTimeout
+from requests import ConnectTimeout, ConnectionError
 import httplib2
 import os
 import datetime
@@ -25,12 +25,13 @@ APP_NAME    = 'youtube api consumer'
 API_KEYFILE = '#api_key.json'  # should be a file in this directory containing a single string
 OAUTH_FILE  = '#credentials.json' # file that contains a serialized http_auth object 
 CLIENT_FILE = "#client_secrets.json" # client secrets file downloaded from the app oauth page
-IGNORE_ERRORS = False
+IGNORE_ERRORS = True # toggle to stop or not stop at uncaught errors
 
 try: 
 	API_KEY = json.load(open(API_KEYFILE))
 except:
 	print("please get a YouTube DATA-API key from https://console.developers.google.com/ ")
+	print("use the app-name {APP_NAME}, or change it in the script".format(**locals()))
 	print()
 	print("1) Which API are you using? => Pick 'YouTube Data API v3 ")
 	print("2) Where will you be calling the API from? => 'Other non-UI (e.g. cron job, deamon)'")
@@ -68,8 +69,9 @@ def setup_oauth(nosave=False):
 	auth_code = input('Enter the auth code: ')
 
 	credentials = flow.step2_exchange(auth_code)
-	with open(OAUTH_FILE,'w') as f:
-		f.write(credentials.to_json())
+	if not nosave:
+		with open(OAUTH_FILE,'w') as f:
+			f.write(credentials.to_json())
 	
 	http_auth = credentials.authorize(httplib2.Http())
 	
@@ -98,7 +100,7 @@ def get(url, params=None, data=None, retries=3, timeout=20, oauth=False):
 		if oauth: 
 			http_auth = get_oauth()
 			response = http_auth.request(url, 'GET', headers=params)
-			if type(response)==tuple: return response[1].decode('utf-8','ignore') # ugly but find; TODO
+			if type(response)==tuple: return response[1].decode('utf-8','ignore') # ugly but fine; TODO
 		else:
 			response = requests.get(url,params=params, data=data, timeout=TIMEOUT)
 		if response.status_code==200: 
@@ -126,7 +128,7 @@ def get(url, params=None, data=None, retries=3, timeout=20, oauth=False):
 				return {}
 		else:
 			raise Exception("incorrect status code! {response.status_code} : {response.reason}".format(**locals()))
-	except ConnectTimeout:
+	except (ConnectTimeout, ConnectionError):
 		if retries > 0:
 			return get(url, params, data, retries-1, timeout)
 		else:
@@ -163,9 +165,9 @@ def search(q, maxpages=-1, expand=False, **kwargs):
 	'maxResults':50,
 	'q':q
 	}
-	data.update(**kwargs)
+	data.update({k:v for k,v in kwargs.items() if v})
 	res = get(url, params=data)
-	if expand: 
+	if expand and res: 
 		res['items'] = expand_videos(res['items'])
 	for item in res.get('items',[]):
 		yield item
@@ -177,15 +179,17 @@ def search(q, maxpages=-1, expand=False, **kwargs):
 		logger.info('searchpage = %s' %res['nextPageToken'])
 		item['RETRIEVED_AT'] = now()
 		res = get(url, params=data)
-		if expand:
+		if expand and res:
 			res['items'] = expand_videos(res['items'])
 		for item in res.get('items',[]):
 			yield item
 
 def expand_videos(vids, **kwargs ):
-	videos = {vid.get('id',False):vid for vid in video_information(vids,**kwargs)}
+	if not vids:
+		return vids
+	videos = {vid.get('id',False):vid for vid in video_information(vids,**kwargs) if vid}
 	for vid in vids:
-		vid.update(videos[vid['id']['videoId']])
+		vid.update(videos.get(vid['id']['videoId'],{}))
 	return vids
 
 def video_information(videos, parts="all", **kwargs):
@@ -241,7 +245,7 @@ def video_information(videos, parts="all", **kwargs):
 	'part':parts,
 	'id':','.join([vid.get('id',{}).get('videoId') for vid in videos])
 	}
-	data.update(**kwargs)
+	data.update({k:v for k,v in kwargs.items() if v})
 	res = get('https://www.googleapis.com/youtube/v3/videos', params=data)
 	for vid in res.get('items',[]):
 		yield vid

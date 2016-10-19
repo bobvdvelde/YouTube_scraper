@@ -20,8 +20,8 @@ import datetime
 import sys
 import os
 
-CONTROTUBE_INDEX = 'youtube_termscraper'
-CONTROTUBE_LOGS  = 'youtube_termlog'
+TUBESCRAPER_INDEX = 'youtube_termscraper'
+TUBESCRAPER_LOGS  = 'youtube_termlog'
 TERMFILE         = 'terms.txt'
 
 client = elasticsearch.Elasticsearch()
@@ -38,12 +38,12 @@ def resume(terms, ignore_logs=False):
 		for nvideo, video in enumerate(search(term, expand=True, nextPageToken=searchpage)):
 			video['TERM_MATCH'] = term
 			video['caption_en'] = get_caption(video, language='en')
-			vidres = client.index(CONTROTUBE_INDEX, doc_type='video', id=video['id'], body=video)
+			vidres = client.index(TUBESCRAPER_INDEX, doc_type='video', id=video['id'], body=video)
 			if vidres.get('created',False)==True:
 				progress['Videos_added']+=1
 			progress['Videos_touched'] += 1
 			for ncomment, comment in enumerate(get_comments(video)):
-				comres = client.index(CONTROTUBE_INDEX, doc_type='comment', id=comment['id'], body=comment)
+				comres = client.index(TUBESCRAPER_INDEX, doc_type='comment', id=comment['id'], body=comment)
 				if comres.get('created',False)==True:
 					progress['Comments_added'] += 1
 				progress['Comments_touched'] +=1
@@ -52,11 +52,11 @@ def resume(terms, ignore_logs=False):
 				for k,v in progress.items():
 					print("{k:20}: {v:10}".format(**locals()))
 			log = dict(at=now(),term=term,nterm=nterm, page=video.get('PAGE',''), ncomments=comment,progress=progress)
-		client.index(CONTROTUBE_LOGS,doc_type='log', body=log)
+			client.index(TUBESCRAPER_LOGS,doc_type='log', body=log)
 
 def last_state(term):
 	try:
-		last = client.search(CONTROTUBE_LOGS, 
+		last = client.search(TUBESCRAPER_LOGS, 
 			body={'filter':{'term':{'term':term}} ,'sort':{'at':'desc'}}).get('hits',{}).get('hits',[])
 	except elasticsearch.exceptions.NotFoundError: 
 		return None

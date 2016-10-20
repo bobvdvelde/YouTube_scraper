@@ -170,6 +170,7 @@ def search(q, maxpages=-1, expand=False, **kwargs):
 	if expand and res: 
 		res['items'] = expand_videos(res['items'])
 	for item in res.get('items',[]):
+		item['PAGE'] = data.get('nextPageToken',None)
 		yield item
 	maxpages -= 1
 	while maxpages!=0 and res.get('nextPageToken',0):

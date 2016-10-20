@@ -35,13 +35,24 @@ def resume(terms, ignore_logs=False):
 			searchpage = last_state(term)
 		else:
 			searchpage = None 
+		try: vids = client.search(TUBESCRAPER_INDEX,'video',{'filter':{'term':{'TERM_MATCH':term}},
+					'sort':{'RETRIEVED':'desc'}})['hits']['hits']
+		except elasticsearch.exceptions.NotFoundError:
+			vids = []
+		if len(vids):
+			lv = vids[0]
+		else:
+			lv = {}
 		for nvideo, video in enumerate(search(term, expand=True, nextPageToken=searchpage)):
 			video['TERM_MATCH'] = term
+			video['RETRIEVED']  = now()
 			video['caption_en'] = get_caption(video, language='en')
 			vidres = client.index(TUBESCRAPER_INDEX, doc_type='video', id=video['id'], body=video)
 			if vidres.get('created',False)==True:
 				progress['Videos_added']+=1
+			elif video['id']!=lv['_source']['id']: continue
 			progress['Videos_touched'] += 1
+			ncomment = 0
 			for ncomment, comment in enumerate(get_comments(video)):
 				comres = client.index(TUBESCRAPER_INDEX, doc_type='comment', id=comment['id'], body=comment)
 				if comres.get('created',False)==True:
@@ -51,13 +62,13 @@ def resume(terms, ignore_logs=False):
 				print("{n} at term {nterm} ({term}) - video {nvideo} - comment {ncomment}".format(**locals()))
 				for k,v in progress.items():
 					print("{k:20}: {v:10}".format(**locals()))
-			log = dict(at=now(),term=term,nterm=nterm, page=video.get('PAGE',''), ncomments=comment,progress=progress)
+			log = dict(at=now(),term=term,nterm=nterm, page=video.get('PAGE',''), ncomments=ncomment,progress=progress)
 			client.index(TUBESCRAPER_LOGS,doc_type='log', body=log)
 
 def last_state(term):
 	try:
 		last = client.search(TUBESCRAPER_LOGS, 
-			body={'filter':{'term':{'term':term}} ,'sort':{'at':'desc'}}).get('hits',{}).get('hits',[])
+			body={'filter':{'term':{'TERM_MATCH':term}} ,'sort':{'at':'desc'}}).get('hits',{}).get('hits',[])
 	except elasticsearch.exceptions.NotFoundError: 
 		return None
 	if len(last)>0:
